@@ -255,25 +255,25 @@ export default function App() {
       <div className="mx-auto max-w-6xl px-3 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] xs:px-4 sm:px-6 sm:py-10 lg:px-8">
         <header className="mb-6 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-5 shadow-2xl shadow-slate-950/50 ring-1 ring-white/5 sm:mb-8 sm:p-7">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <span className="inline-flex rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+            <div className="text-center lg:text-left">
+              <span className="mx-auto inline-flex rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200 sm:text-[11px] lg:mx-0">
                 Tournament Registration
               </span>
-              <h1 className="mt-3 font-display text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl">
+              <h1 className="mt-3 font-display text-2xl font-bold leading-tight tracking-tight text-white sm:text-4xl">
                 Pool Player List
               </h1>
-              <p className="mt-2 max-w-2xl text-pretty text-sm text-slate-300 sm:text-base">
+              <p className="mt-2 max-w-2xl text-pretty text-xs text-slate-300 sm:text-base lg:max-w-none">
                 Manage weekly sign-ups with fixed slots, strict registration hours,
                 and automatic Wednesday resets.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 lg:min-w-[370px]">
+            <div className="grid grid-cols-1 gap-2 text-center xs:grid-cols-2 lg:min-w-[370px] lg:text-left">
               <div className="rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
                   Local Time
                 </p>
-                <p className="mt-0.5 text-sm font-semibold text-cyan-200">
+                <p className="mt-0.5 text-xs font-semibold text-cyan-200 sm:text-sm">
                   {formatTime(now)}
                 </p>
               </div>
@@ -282,7 +282,7 @@ export default function App() {
                   Window
                 </p>
                 <p
-                  className={`mt-0.5 text-sm font-semibold ${
+                  className={`mt-0.5 text-xs font-semibold sm:text-sm ${
                     openWindow ? 'text-emerald-300' : 'text-amber-200'
                   }`}
                 >
@@ -293,7 +293,7 @@ export default function App() {
                 <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
                   Filled Slots
                 </p>
-                <p className="mt-0.5 text-sm font-semibold text-white">
+                <p className="mt-0.5 text-xs font-semibold text-white sm:text-sm">
                   {filled} / {SLOT_COUNT}
                 </p>
               </div>
@@ -301,7 +301,7 @@ export default function App() {
                 <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
                   Next Opening
                 </p>
-                <p className="mt-0.5 text-sm font-semibold text-amber-200">
+                <p className="mt-0.5 text-xs font-semibold text-amber-200 sm:text-sm">
                   {openWindow ? 'In Progress' : formatDuration(countdownMs)}
                 </p>
               </div>
