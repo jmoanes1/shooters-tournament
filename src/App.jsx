@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 
 const STORAGE_KEY = 'pool-player-registration-v1'
 const SLOT_COUNT = 16
@@ -147,6 +147,13 @@ export default function App() {
   const isFull = filled >= SLOT_COUNT
   const countdownMs = msUntilNextWednesday10AM(now)
   const closedMessage = getRegistrationClosedMessage(now)
+  const trimmedName = name.trim()
+
+  const disabledReason = useMemo(() => {
+    if (isFull) return 'Registration list is full for this week.'
+    if (!openWindow) return closedMessage
+    return ''
+  }, [isFull, openWindow, closedMessage])
 
   const register = useCallback(
     (e) => {
@@ -168,6 +175,17 @@ export default function App() {
       const trimmed = name.trim()
       if (!trimmed) {
         setStatus({ type: 'error', text: 'Please enter a name.' })
+        return
+      }
+      const lowerTrimmed = trimmed.toLocaleLowerCase()
+      const duplicateExists = slots.some(
+        (player) => player && player.name.toLocaleLowerCase() === lowerTrimmed,
+      )
+      if (duplicateExists) {
+        setStatus({
+          type: 'error',
+          text: 'This player is already registered. Use a different name or remove the existing slot first.',
+        })
         return
       }
 
@@ -212,6 +230,18 @@ export default function App() {
     setRemoveSlotIndex(null)
   }, [])
 
+  useEffect(() => {
+    if (removeSlotIndex === null) return
+
+    // Support keyboard-first users by allowing Escape to dismiss the confirmation modal.
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') closeRemoveModal()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [removeSlotIndex, closeRemoveModal])
+
   const confirmRemovePlayer = useCallback(() => {
     if (removeSlotIndex === null) return
     removePlayer(removeSlotIndex)
@@ -221,25 +251,61 @@ export default function App() {
   const formDisabled = !openWindow || isFull
 
   return (
-    <div className="min-h-[100dvh] min-h-screen bg-slate-950 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(56,189,248,0.15),transparent)] text-slate-100">
-      <div className="mx-auto max-w-5xl px-2.5 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] xs:px-3 sm:px-6 sm:py-10 lg:px-8">
-        <header className="mb-6 text-center sm:mb-10">
-          <h1 className="font-display text-[1.65rem] font-bold leading-tight tracking-tight text-white xs:text-3xl sm:text-4xl">
-            Pool Player Registration
-          </h1>
-          <p className="mx-auto mt-2 max-w-md text-pretty text-sm text-slate-400 sm:max-w-none sm:text-base">
-            Up to {SLOT_COUNT} players · Registration every Wednesday, 10:00 AM
-            to 7:00 PM · Weekly reset at 10:00 AM
-          </p>
-          <div className="mt-4 flex flex-col items-stretch gap-2 xs:flex-row xs:flex-wrap xs:items-center xs:justify-center xs:gap-3">
-            <span className="rounded-full bg-slate-800/80 px-4 py-2 text-center text-sm font-medium text-cyan-300 ring-1 ring-slate-700 sm:py-1.5">
-              {formatTime(now)}
-            </span>
-            {!openWindow && countdownMs > 0 && (
-              <span className="rounded-full bg-amber-500/10 px-4 py-2 text-center text-sm text-amber-200 ring-1 ring-amber-500/30 sm:py-1.5">
-                Opens in {formatDuration(countdownMs)}
+    <div className="min-h-[100dvh] min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_8%_8%,rgba(20,184,166,0.15),transparent_36%),radial-gradient(circle_at_92%_-2%,rgba(56,189,248,0.14),transparent_42%)] text-slate-100">
+      <div className="mx-auto max-w-6xl px-3 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] xs:px-4 sm:px-6 sm:py-10 lg:px-8">
+        <header className="mb-6 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-5 shadow-2xl shadow-slate-950/50 ring-1 ring-white/5 sm:mb-8 sm:p-7">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <span className="inline-flex rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                Tournament Registration
               </span>
-            )}
+              <h1 className="mt-3 font-display text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl">
+                Pool Player List
+              </h1>
+              <p className="mt-2 max-w-2xl text-pretty text-sm text-slate-300 sm:text-base">
+                Manage weekly sign-ups with fixed slots, strict registration hours,
+                and automatic Wednesday resets.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 lg:min-w-[370px]">
+              <div className="rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  Local Time
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-cyan-200">
+                  {formatTime(now)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  Window
+                </p>
+                <p
+                  className={`mt-0.5 text-sm font-semibold ${
+                    openWindow ? 'text-emerald-300' : 'text-amber-200'
+                  }`}
+                >
+                  {openWindow ? 'Open Now' : 'Closed'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  Filled Slots
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-white">
+                  {filled} / {SLOT_COUNT}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  Next Opening
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-amber-200">
+                  {openWindow ? 'In Progress' : formatDuration(countdownMs)}
+                </p>
+              </div>
+            </div>
           </div>
         </header>
 
@@ -275,22 +341,27 @@ export default function App() {
         )}
 
         {/* Form first on narrow screens so users can register without scrolling past all slots */}
-        <div className="flex flex-col gap-6 sm:gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start lg:gap-10">
+        <div className="flex flex-col gap-6 sm:gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(290px,340px)] lg:items-start lg:gap-10">
           <section
             aria-label="Player slots"
-            className="order-2 min-w-0 rounded-2xl border border-slate-800/80 bg-slate-900/45 p-3 shadow-xl ring-1 ring-white/5 xs:p-4 sm:p-5 lg:order-1"
+            className="order-2 min-w-0 rounded-2xl border border-slate-800/80 bg-slate-900/55 p-3 shadow-xl ring-1 ring-white/5 xs:p-4 sm:p-5 lg:order-1"
           >
-            <h2 className="mb-3 font-display text-base font-semibold text-white sm:mb-4 sm:text-lg">
-              Slots ({filled}/{SLOT_COUNT})
-            </h2>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="font-display text-base font-semibold text-white sm:text-lg">
+                Registered Players
+              </h2>
+              <span className="rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs font-semibold text-slate-200">
+                {filled}/{SLOT_COUNT}
+              </span>
+            </div>
             <ul className="grid grid-cols-1 gap-2.5 min-[380px]:grid-cols-2 xs:gap-3 sm:grid-cols-3 md:grid-cols-4">
               {slots.map((player, i) => (
                 <li key={i} className="min-w-0">
                   <div
-                    className={`flex h-full min-h-[92px] flex-col rounded-xl border p-2.5 transition sm:min-h-[100px] sm:p-3 ${
+                    className={`flex h-full min-h-[95px] flex-col rounded-xl border p-2.5 transition sm:min-h-[104px] sm:p-3 ${
                       player
-                        ? 'border-emerald-500/40 bg-emerald-950/40 shadow-lg shadow-emerald-900/20'
-                        : 'border-slate-700/80 bg-slate-900/50'
+                        ? 'border-emerald-400/40 bg-gradient-to-br from-emerald-950/60 to-emerald-900/20 shadow-lg shadow-emerald-900/20'
+                        : 'border-slate-700/80 bg-slate-900/45'
                     }`}
                   >
                     <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
@@ -308,7 +379,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => openRemoveModal(i)}
-                            className="min-h-[38px] rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-400/60"
+                            className="min-h-[38px] rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-400/60 hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-400/60"
                             aria-label={`Remove ${player.name} from slot ${i + 1}`}
                           >
                             Remove
@@ -324,16 +395,14 @@ export default function App() {
             </ul>
           </section>
 
-          <aside className="order-1 lg:sticky lg:top-6 lg:order-2 lg:pt-8">
+          <aside className="order-1 lg:sticky lg:top-6 lg:order-2 lg:pt-2">
             <form
               onSubmit={register}
-              className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-xl ring-1 ring-white/5 backdrop-blur sm:p-6"
+              className="rounded-2xl border border-slate-800 bg-slate-900/90 p-4 shadow-xl ring-1 ring-white/5 backdrop-blur sm:p-6"
             >
-              <h2 className="font-display text-lg font-semibold text-white">
-                Register
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">
-                First available slot is filled automatically.
+              <h2 className="font-display text-lg font-semibold text-white">Add Player</h2>
+              <p className="mt-1 text-xs text-slate-400">
+                The first available slot is assigned automatically.
               </p>
 
               <label className="mt-5 block text-sm font-medium text-slate-300">
@@ -348,8 +417,12 @@ export default function App() {
                   placeholder="Player name"
                   autoComplete="name"
                   inputMode="text"
+                  maxLength={40}
                 />
               </label>
+              <p className="mt-1 text-xs text-slate-500">
+                Keep names short and unique (max 40 characters).
+              </p>
 
               <label className="mt-4 block text-sm font-medium text-slate-300">
                 Level
@@ -370,10 +443,18 @@ export default function App() {
               <button
                 type="submit"
                 disabled={formDisabled}
-                className="mt-6 min-h-[50px] w-full rounded-lg bg-cyan-600 py-3 text-base font-semibold text-white shadow-lg shadow-cyan-900/30 transition active:bg-cyan-700 hover:bg-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:shadow-none sm:min-h-[44px] sm:py-2.5"
+                className="mt-6 min-h-[50px] w-full rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 py-3 text-base font-semibold text-white shadow-lg shadow-cyan-900/30 transition hover:from-cyan-500 hover:to-teal-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:bg-none disabled:bg-slate-700 disabled:shadow-none sm:min-h-[44px] sm:py-2.5"
               >
                 {isFull ? 'List full' : !openWindow ? 'Open Wed 10 AM - 7 PM' : 'Join'}
               </button>
+              {!formDisabled && !trimmedName && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Enter a name and choose a level to register.
+                </p>
+              )}
+              {formDisabled && (
+                <p className="mt-2 text-xs text-amber-300/90">{disabledReason}</p>
+              )}
             </form>
           </aside>
         </div>
@@ -385,8 +466,12 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="remove-player-title"
+          onClick={closeRemoveModal}
         >
-          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl sm:p-5">
+          <div
+            className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl sm:p-5"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h3
               id="remove-player-title"
               className="font-display text-lg font-semibold text-white"
@@ -413,6 +498,9 @@ export default function App() {
                 Remove
               </button>
             </div>
+            <p className="mt-3 text-center text-xs text-slate-500">
+              Tip: press Esc to close
+            </p>
           </div>
         </div>
       )}

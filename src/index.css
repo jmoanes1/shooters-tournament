@@ -4,12 +4,15 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  color-scheme: dark;
 }
 
 body {
-  @apply antialiased overflow-x-hidden;
+  @apply overflow-x-hidden antialiased;
   /* Safe area for notched phones (iOS / Android gesture nav) */
   padding-left: env(safe-area-inset-left, 0);
   padding-right: env(safe-area-inset-right, 0);
   padding-bottom: env(safe-area-inset-bottom, 0);
+  background-color: #020617;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
