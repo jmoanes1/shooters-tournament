@@ -101,6 +101,24 @@ function saveStored(slots, lastResetEpoch) {
   )
 }
 
+function normalizeStoredState(rawValue) {
+  if (!rawValue) return null
+  try {
+    const data = JSON.parse(rawValue)
+    const slots = Array.isArray(data.slots)
+      ? data.slots.slice(0, SLOT_COUNT)
+      : Array(SLOT_COUNT).fill(null)
+    while (slots.length < SLOT_COUNT) slots.push(null)
+    return {
+      slots,
+      lastResetEpoch:
+        typeof data.lastResetEpoch === 'number' ? data.lastResetEpoch : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 function loadOrCreateClientId() {
   const existing = localStorage.getItem(CLIENT_ID_KEY)
   if (existing) return existing
@@ -155,6 +173,20 @@ export default function App() {
   useEffect(() => {
     saveStored(slots, lastResetEpoch)
   }, [slots, lastResetEpoch])
+
+  // Realtime slot sync across tabs/windows for the same origin.
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event.key !== STORAGE_KEY) return
+      const nextState = normalizeStoredState(event.newValue)
+      if (!nextState) return
+      setSlots(nextState.slots)
+      setLastResetEpoch(nextState.lastResetEpoch)
+    }
+
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
 
   const openWindow = isRegistrationWindowOpen(now)
   const filled = slots.filter(Boolean).length
