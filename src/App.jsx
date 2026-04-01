@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 
 const STORAGE_KEY = 'pool-player-registration-v1'
 const CLIENT_ID_KEY = 'pool-player-client-id-v1'
+const SHARED_STATE_ENDPOINT = '/api/slots-state'
 const SLOT_COUNT = 16
 const LEVELS = ['C', 'B', 'A', 'A+', 'A++']
 
@@ -140,34 +141,21 @@ export default function App() {
   )
   const [name, setName] = useState('')
   const [level, setLevel] = useState('C')
+  const [showRegisterForm, setShowRegisterForm] = useState(false)
   const [status, setStatus] = useState({ type: null, text: '' })
   const [removeSlotIndex, setRemoveSlotIndex] = useState(null)
+  const [remoteVersion, setRemoteVersion] = useState(0)
+  const remoteVersionRef = useRef(0)
+
+  useEffect(() => {
+    remoteVersionRef.current = remoteVersion
+  }, [remoteVersion])
 
   // Tick clock every second (current time + countdown + window checks).
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(id)
   }, [])
-
-  // Weekly reset at Wednesday 10:00 AM so each registration day starts with a clean list.
-  useEffect(() => {
-    const boundary = getLastWednesday10AM(now).getTime()
-
-    if (lastResetEpoch != null && lastResetEpoch >= boundary) return
-
-    // Legacy / first load: no stored reset time — keep slots, only record current boundary.
-    if (lastResetEpoch === null) {
-      setLastResetEpoch(boundary)
-      return
-    }
-
-    setSlots(Array(SLOT_COUNT).fill(null))
-    setLastResetEpoch(boundary)
-    setStatus({
-      type: 'success',
-      text: 'Weekly list reset (Wednesday 10:00 AM).',
-    })
-  }, [now, lastResetEpoch])
 
   // Persist whenever slots or lastResetEpoch change.
   useEffect(() => {
@@ -187,6 +175,97 @@ export default function App() {
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
+
+  const applySharedState = useCallback((nextState, options = {}) => {
+    const { force = false } = options
+    if (!nextState || !Array.isArray(nextState.slots)) return false
+
+    const incomingVersion =
+      typeof nextState.version === 'number' ? nextState.version : 0
+    if (!force && incomingVersion <= remoteVersionRef.current) return false
+
+    setSlots(nextState.slots)
+    setLastResetEpoch(
+      typeof nextState.lastResetEpoch === 'number' ? nextState.lastResetEpoch : null,
+    )
+    setRemoteVersion(incomingVersion)
+    return true
+  }, [])
+
+  const pullSharedState = useCallback(
+    async (options = {}) => {
+      try {
+        const res = await fetch(SHARED_STATE_ENDPOINT, { method: 'GET' })
+        if (!res.ok) return false
+        const data = await res.json()
+        return applySharedState(data, options)
+      } catch {
+        return false
+      }
+    },
+    [applySharedState],
+  )
+
+  const pushSharedState = useCallback(
+    async (nextSlots, nextLastResetEpoch) => {
+      try {
+        const res = await fetch(SHARED_STATE_ENDPOINT, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            slots: nextSlots,
+            lastResetEpoch: nextLastResetEpoch,
+            baseVersion: remoteVersionRef.current,
+          }),
+        })
+        const data = await res.json()
+
+        if (res.status === 409) {
+          applySharedState(data, { force: true })
+          return { ok: false, conflict: true }
+        }
+        if (!res.ok) return { ok: false, conflict: false }
+
+        applySharedState(data, { force: true })
+        return { ok: true, conflict: false }
+      } catch {
+        return { ok: false, conflict: false }
+      }
+    },
+    [applySharedState],
+  )
+
+  // Shared sync for all users: initial pull then light polling.
+  useEffect(() => {
+    void pullSharedState({ force: true })
+    const id = setInterval(() => {
+      void pullSharedState()
+    }, 2000)
+    return () => clearInterval(id)
+  }, [pullSharedState])
+
+  // Weekly reset at Wednesday 10:00 AM so each registration day starts with a clean list.
+  useEffect(() => {
+    const boundary = getLastWednesday10AM(now).getTime()
+
+    if (lastResetEpoch != null && lastResetEpoch >= boundary) return
+
+    // Legacy / first load: no stored reset time — keep slots, only record current boundary.
+    if (lastResetEpoch === null) {
+      setLastResetEpoch(boundary)
+      void pushSharedState(slots, boundary)
+      return
+    }
+
+    const clearedSlots = Array(SLOT_COUNT).fill(null)
+    setSlots(clearedSlots)
+    setLastResetEpoch(boundary)
+    void pushSharedState(clearedSlots, boundary)
+    setStatus({
+      type: 'success',
+      text: 'Weekly list reset (Wednesday 10:00 AM).',
+    })
+  }, [now, lastResetEpoch, pushSharedState, slots])
 
   const openWindow = isRegistrationWindowOpen(now)
   const filled = slots.filter(Boolean).length
@@ -241,35 +320,39 @@ export default function App() {
         return
       }
 
-      setSlots((prev) => {
-        const next = [...prev]
-        // Keep slot ownership tied to the client that created it.
-        next[idx] = { name: trimmed, level, ownerId: clientId }
-        return next
-      })
+      const nextSlots = [...slots]
+      // Keep slot ownership tied to the client that created it.
+      nextSlots[idx] = { name: trimmed, level, ownerId: clientId }
+      setSlots(nextSlots)
       setName('')
       setStatus({
         type: 'success',
         text: `Registered in slot ${idx + 1}.`,
       })
+      void pushSharedState(nextSlots, lastResetEpoch).then((result) => {
+        if (!result.conflict) return
+        setStatus({
+          type: 'error',
+          text: 'Another player updated the list first. Please check the latest slots and register again.',
+        })
+      })
     },
-    [openWindow, isFull, name, level, slots, closedMessage, clientId],
+    [openWindow, isFull, name, level, slots, closedMessage, clientId, pushSharedState, lastResetEpoch],
   )
 
   const removePlayer = useCallback((slotIndex) => {
-    setSlots((prev) => {
-      const slot = prev[slotIndex]
-      if (!slot) return prev
-      if (slot.ownerId && slot.ownerId !== clientId) return prev
-      const next = [...prev]
-      next[slotIndex] = null
-      return next
-    })
+    const slot = slots[slotIndex]
+    if (!slot) return
+    if (slot.ownerId && slot.ownerId !== clientId) return
+    const nextSlots = [...slots]
+    nextSlots[slotIndex] = null
+    setSlots(nextSlots)
     setStatus({
       type: 'success',
       text: `Removed player from slot ${slotIndex + 1}.`,
     })
-  }, [clientId])
+    void pushSharedState(nextSlots, lastResetEpoch)
+  }, [clientId, slots, pushSharedState, lastResetEpoch])
 
   const openRemoveModal = useCallback((slotIndex) => {
     const slot = slots[slotIndex]
@@ -458,66 +541,82 @@ export default function App() {
           </section>
 
           <aside className="order-1 lg:sticky lg:top-6 lg:order-2 lg:pt-2">
-            <form
-              onSubmit={register}
-              className="rounded-2xl border border-slate-800 bg-slate-900/90 p-4 shadow-xl ring-1 ring-white/5 backdrop-blur sm:p-6"
-            >
-              <h2 className="font-display text-lg font-semibold text-white">Add Player</h2>
-              <p className="mt-1 text-xs text-slate-400">
-                The first available slot is assigned automatically.
-              </p>
-
-              <label className="mt-5 block text-sm font-medium text-slate-300">
-                Name
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  disabled={formDisabled}
-                  enterKeyHint="done"
-                  className="mt-1.5 min-h-[48px] w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-3 text-base text-white placeholder-slate-600 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-2.5"
-                  placeholder="Player name"
-                  autoComplete="name"
-                  inputMode="text"
-                  maxLength={40}
-                />
-              </label>
-              <p className="mt-1 text-xs text-slate-500">
-                Keep names short and unique (max 40 characters).
-              </p>
-
-              <label className="mt-4 block text-sm font-medium text-slate-300">
-                Level
-                <select
-                  value={level}
-                  onChange={(e) => setLevel(e.target.value)}
-                  disabled={formDisabled}
-                  className="mt-1.5 min-h-[48px] w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-3 text-base text-white focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-2.5"
-                >
-                  {LEVELS.map((l) => (
-                    <option key={l} value={l}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <button
-                type="submit"
-                disabled={formDisabled}
-                className="mt-6 min-h-[50px] w-full rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 py-3 text-base font-semibold text-white shadow-lg shadow-cyan-900/30 transition hover:from-cyan-500 hover:to-teal-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:bg-none disabled:bg-slate-700 disabled:shadow-none sm:min-h-[44px] sm:py-2.5"
-              >
-                {isFull ? 'List full' : !openWindow ? 'Open Wed 10 AM - 7 PM' : 'Join'}
-              </button>
-              {!formDisabled && !trimmedName && (
-                <p className="mt-2 text-xs text-slate-500">
-                  Enter a name and choose a level to register.
+            {!showRegisterForm ? (
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-4 shadow-xl ring-1 ring-white/5 backdrop-blur sm:p-6">
+                <h2 className="font-display text-lg font-semibold text-white">Add Player</h2>
+                <p className="mt-1 text-xs text-slate-400">
+                  Click Register to open the form.
                 </p>
-              )}
-              {formDisabled && (
-                <p className="mt-2 text-xs text-amber-300/90">{disabledReason}</p>
-              )}
-            </form>
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterForm(true)}
+                  className="mt-5 min-h-[50px] w-full rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 py-3 text-base font-semibold text-white shadow-lg shadow-cyan-900/30 transition hover:from-cyan-500 hover:to-teal-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-slate-900 sm:min-h-[44px] sm:py-2.5"
+                >
+                  Register
+                </button>
+              </div>
+            ) : (
+              <form
+                onSubmit={register}
+                className="rounded-2xl border border-slate-800 bg-slate-900/90 p-4 shadow-xl ring-1 ring-white/5 backdrop-blur sm:p-6"
+              >
+                <h2 className="font-display text-lg font-semibold text-white">Add Player</h2>
+                <p className="mt-1 text-xs text-slate-400">
+                  The first available slot is assigned automatically.
+                </p>
+
+                <label className="mt-5 block text-sm font-medium text-slate-300">
+                  Name
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={formDisabled}
+                    enterKeyHint="done"
+                    className="mt-1.5 min-h-[48px] w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-3 text-base text-white placeholder-slate-600 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-2.5"
+                    placeholder="Player name"
+                    autoComplete="name"
+                    inputMode="text"
+                    maxLength={40}
+                  />
+                </label>
+                <p className="mt-1 text-xs text-slate-500">
+                  Keep names short and unique (max 40 characters).
+                </p>
+
+                <label className="mt-4 block text-sm font-medium text-slate-300">
+                  Level
+                  <select
+                    value={level}
+                    onChange={(e) => setLevel(e.target.value)}
+                    disabled={formDisabled}
+                    className="mt-1.5 min-h-[48px] w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-3 text-base text-white focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-2.5"
+                  >
+                    {LEVELS.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={formDisabled}
+                  className="mt-6 min-h-[50px] w-full rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 py-3 text-base font-semibold text-white shadow-lg shadow-cyan-900/30 transition hover:from-cyan-500 hover:to-teal-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:bg-none disabled:bg-slate-700 disabled:shadow-none sm:min-h-[44px] sm:py-2.5"
+                >
+                  {isFull ? 'List full' : !openWindow ? 'Open Wed 10 AM - 7 PM' : 'Join'}
+                </button>
+                {!formDisabled && !trimmedName && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Enter a name and choose a level to register.
+                  </p>
+                )}
+                {formDisabled && (
+                  <p className="mt-2 text-xs text-amber-300/90">{disabledReason}</p>
+                )}
+              </form>
+            )}
           </aside>
         </div>
       </div>
