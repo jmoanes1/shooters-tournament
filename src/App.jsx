@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 
 const STORAGE_KEY = 'pool-player-registration-v1'
+const CLIENT_ID_KEY = 'pool-player-client-id-v1'
 const SLOT_COUNT = 16
-const LEVELS = ['C', 'B', 'A+', 'A++']
+const LEVELS = ['C', 'B', 'A', 'A+', 'A++']
 
 /** Most recent Wednesday 10:00 local time that is still <= `date` (reset boundary for this week). */
 function getLastWednesday10AM(date = new Date()) {
@@ -100,7 +101,20 @@ function saveStored(slots, lastResetEpoch) {
   )
 }
 
+function loadOrCreateClientId() {
+  const existing = localStorage.getItem(CLIENT_ID_KEY)
+  if (existing) return existing
+
+  const generated =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  localStorage.setItem(CLIENT_ID_KEY, generated)
+  return generated
+}
+
 export default function App() {
+  const [clientId] = useState(() => loadOrCreateClientId())
   const [now, setNow] = useState(() => new Date())
   const [slots, setSlots] = useState(() => loadStored().slots)
   const [lastResetEpoch, setLastResetEpoch] = useState(
@@ -197,7 +211,8 @@ export default function App() {
 
       setSlots((prev) => {
         const next = [...prev]
-        next[idx] = { name: trimmed, level }
+        // Keep slot ownership tied to the client that created it.
+        next[idx] = { name: trimmed, level, ownerId: clientId }
         return next
       })
       setName('')
@@ -206,12 +221,14 @@ export default function App() {
         text: `Registered in slot ${idx + 1}.`,
       })
     },
-    [openWindow, isFull, name, level, slots, closedMessage],
+    [openWindow, isFull, name, level, slots, closedMessage, clientId],
   )
 
   const removePlayer = useCallback((slotIndex) => {
     setSlots((prev) => {
-      if (!prev[slotIndex]) return prev
+      const slot = prev[slotIndex]
+      if (!slot) return prev
+      if (slot.ownerId && slot.ownerId !== clientId) return prev
       const next = [...prev]
       next[slotIndex] = null
       return next
@@ -220,11 +237,19 @@ export default function App() {
       type: 'success',
       text: `Removed player from slot ${slotIndex + 1}.`,
     })
-  }, [])
+  }, [clientId])
 
   const openRemoveModal = useCallback((slotIndex) => {
+    const slot = slots[slotIndex]
+    if (slot?.ownerId && slot.ownerId !== clientId) {
+      setStatus({
+        type: 'error',
+        text: 'You can only remove your own slot.',
+      })
+      return
+    }
     setRemoveSlotIndex(slotIndex)
-  }, [])
+  }, [slots, clientId])
 
   const closeRemoveModal = useCallback(() => {
     setRemoveSlotIndex(null)
@@ -358,7 +383,7 @@ export default function App() {
               {slots.map((player, i) => (
                 <li key={i} className="min-w-0">
                   <div
-                    className={`flex h-full min-h-[95px] flex-col rounded-xl border p-2.5 transition sm:min-h-[104px] sm:p-3 ${
+                    className={`group flex h-full min-h-[95px] flex-col rounded-xl border p-2.5 transition sm:min-h-[104px] sm:p-3 ${
                       player
                         ? 'border-emerald-400/40 bg-gradient-to-br from-emerald-950/60 to-emerald-900/20 shadow-lg shadow-emerald-900/20'
                         : 'border-slate-700/80 bg-slate-900/45'
@@ -379,10 +404,15 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => openRemoveModal(i)}
-                            className="min-h-[38px] rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-400/60 hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-400/60"
+                            disabled={Boolean(player.ownerId && player.ownerId !== clientId)}
+                            className={`min-h-[38px] rounded-md border px-2 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto ${
+                              !player.ownerId || player.ownerId === clientId
+                                ? 'border-rose-500/40 bg-rose-500/10 text-rose-200 hover:border-rose-400/60 hover:bg-rose-500/20 focus:ring-rose-400/60'
+                                : 'cursor-not-allowed border-slate-700 bg-slate-800/70 text-slate-500 focus:ring-slate-500/30'
+                            }`}
                             aria-label={`Remove ${player.name} from slot ${i + 1}`}
                           >
-                            Remove
+                            {!player.ownerId || player.ownerId === clientId ? 'Remove' : 'Locked'}
                           </button>
                         </div>
                       </>
